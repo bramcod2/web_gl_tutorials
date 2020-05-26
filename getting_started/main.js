@@ -120,25 +120,41 @@ function main(){
 	const vsSource = `
 	attribute vec4 aVertexPosition;
 	attribute vec2 aTextureCoord;
+	attribute vec3 aVertexNormal;
 
 	uniform mat4 uModelViewMatrix;
 	uniform mat4 uProjectionMatrix;
+	uniform mat4 uNormalMatrix;
 
 	varying highp vec2 vTextureCoord;
+	varying highp vec3 vLighting;
 
 	void main(){
 		gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
 		vTextureCoord = aTextureCoord;
+
+		// Apply Lighting effect
+		highp vec3 ambientLight = vec3(0.3, 0.3, 0.3);
+		highp vec3 directionalLightColor = vec3(1, 1, 1);
+		highp vec3 directionalVector = normalize(vec3(0.85, 0.8, 0.75));
+
+		highp vec4 transformedNormal = uNormalMatrix * vec4(aVertexNormal, 1.0);
+
+		highp float directional = max(dot(transformedNormal.xyz, directionalVector), 0.0);
+		vLighting = ambientLight + (directionalLightColor * directional);
 	}
 	`;
 	// Fragment shader program
 	const fsSource = `
 		varying highp vec2 vTextureCoord;
+		varying highp vec3 vLighting;
 
 		uniform sampler2D uSampler;
 
 		void main(void) {
-			gl_FragColor = texture2D(uSampler, vTextureCoord);
+			highp vec4 texelColor = texture2D(uSampler, vTextureCoord);
+
+			gl_FragColor = vec4(texelColor.rgb * vLighting, texelColor.a);
 		}
 	`;
 
@@ -148,11 +164,13 @@ function main(){
 		program: shaderProgram,
 		attribLocations: {
 			vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+			vertexNormal: gl.getAttribLocation(shaderProgram, 'aVertexNormal'),
 			textureCoord: gl.getAttribLocation(shaderProgram, 'aTextureCoord'),
 		},
 		uniformLocations: {
 			projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
 			modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+			normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
 			uSampler: gl.getUniformLocation(shaderProgram, 'uSampler'),
 		},	
 	};
@@ -291,9 +309,53 @@ function initBuffers(gl) {
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
 		new Uint16Array(indices), gl.STATIC_DRAW);
 
+	// Normals
+	const normalBuffer = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+
+	const vertexNormals = [
+		// Front
+	     0.0,  0.0,  1.0,
+	     0.0,  0.0,  1.0,
+	     0.0,  0.0,  1.0,
+	     0.0,  0.0,  1.0,
+
+	    // Back
+	     0.0,  0.0, -1.0,
+	     0.0,  0.0, -1.0,
+	     0.0,  0.0, -1.0,
+	     0.0,  0.0, -1.0,
+
+	    // Top
+	     0.0,  1.0,  0.0,
+	     0.0,  1.0,  0.0,
+	     0.0,  1.0,  0.0,
+	     0.0,  1.0,  0.0,
+
+	    // Bottom
+	     0.0, -1.0,  0.0,
+	     0.0, -1.0,  0.0,
+	     0.0, -1.0,  0.0,
+	     0.0, -1.0,  0.0,
+
+	    // Right
+	     1.0,  0.0,  0.0,
+	     1.0,  0.0,  0.0,
+	     1.0,  0.0,  0.0,
+	     1.0,  0.0,  0.0,
+
+	    // Left
+	    -1.0,  0.0,  0.0,
+	    -1.0,  0.0,  0.0,
+	    -1.0,  0.0,  0.0,
+	    -1.0,  0.0,  0.0
+	];
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexNormals), 
+		gl.STATIC_DRAW);
 	
 	return {
 		position: positionBuffer,
+		normal: normalBuffer,
 		// color: colorBuffer,
 		textureCoord: textureCoordBuffer,
 		indices: indexBuffer,
@@ -349,6 +411,9 @@ function drawScene(gl, programInfo, buffers, texture, deltaTime) {
 		cubeRotation * .3,				// amount to rotate in radians
 		[0, 0, 1]);					// axis to rotate around (z)
 
+	const normalMatrix = mat4.create();
+	mat4.invert(normalMatrix, modelViewMatrix);
+	mat4.transpose(normalMatrix, normalMatrix);
 
 	// Tell WebGL how to pull out the positions from the position
 	// buffer into the vertexPosition attribute.
@@ -382,6 +447,25 @@ function drawScene(gl, programInfo, buffers, texture, deltaTime) {
 		gl.enableVertexAttribArray(programInfo.attribLocations.textureCoord);
 	}	
 	{
+		// Tell WebGL how to pull out the normals from
+		// the normal buffer into the vertexNormal attribute.
+		const numComponents = 3;
+		const type = gl.FLOAT;
+		const normalize = false;
+		const stride = 0;
+		const offset = 0;
+		gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+		gl.vertexAttribPointer(
+			programInfo.attribLocations.vertexNormal,
+			numComponents,
+			type,
+			normalize,
+			stride,
+			offset);
+		gl.enableVertexAttribArray(
+			programInfo.attribLocations.vertexNormal);
+	}
+	{
 		// Tell WebGL which indices to use to index the vertices
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
 	}
@@ -399,6 +483,10 @@ function drawScene(gl, programInfo, buffers, texture, deltaTime) {
 		programInfo.uniformLocations.modelViewMatrix,
 		false,
 		modelViewMatrix);
+	gl.uniformMatrix4fv(
+		programInfo.uniformLocations.normalMatrix,
+		false,
+		normalMatrix);
 
 
 	// Tell WebGL we want to affect texture unit 0
